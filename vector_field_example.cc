@@ -54,7 +54,7 @@ using namespace dealii;
 //Define the order of the basis functions (Lagrange polynomials)
 //and the order of the quadrature rule globally
 const unsigned int order = 1;
-const unsigned int quadRule = 4;
+const unsigned int quadRule = 2;
 
 template <int dim>
 class FEM
@@ -72,11 +72,13 @@ class FEM
         void assemble_system();
         void solve(); 
         void output_results (const unsigned int cycle) const;
+        void output_sol_dat (const unsigned int cycle);
 
         // these three functions below are employed to compute the velocity field due to toroidal magnetic field (currently just once, in the beginning of the simulation)
         void assemble_vel();
         void solve_vel(); 
         void output_vel (const unsigned int cycle) const;
+        void output_vel_dat (const unsigned int cycle);
 
     // a vector for the initial toroidal magnetic field. We will specify its components inside the assembly_vel procedure at all quadrature points.
     std::vector<double> BT_INITIAL = {0.,0.,0.}; 
@@ -150,8 +152,16 @@ FEM<dim>::~FEM (){dof_handler.clear ();}
 template <int dim> 
 int FEM<dim>::e(int i, int j, int k){
 
+    if( (i-j==-1) || (i-j==2) ){
+            return 1;
+        }
+    else{
+        return -1;
+    }
+     
+    /*
     if (i==j && i==k && k==j){
-        return 0;
+       return 0;
     }
     else if (i==0 && j==1 && k==2){
        return 1;
@@ -174,6 +184,7 @@ int FEM<dim>::e(int i, int j, int k){
     else{
         return 0;
     }
+    */
 }
 
 
@@ -187,11 +198,11 @@ void FEM<dim>::generate_mesh(){ // setting up the mesh
             z_center = 0.;
 
     Point<dim,double> center(x_center,y_center,z_center);
-    GridGenerator::hyper_shell (triangulation, center, 0.4, 1.0, 96, true);
+    GridGenerator::hyper_shell (triangulation, center, 0.5, 0.9, 96, true);
     static const SphericalManifold<3> manifold_description(center);
     triangulation.set_all_manifold_ids(0);
     triangulation.set_manifold (0, manifold_description);
-    triangulation.refine_global(2);
+    triangulation.refine_global(3);
 }
 
 
@@ -204,9 +215,10 @@ void FEM<dim>::apply_initial_conditions(){
     LA::MPI::Vector auxiliary_vector (locally_owned_dofs, mpi_communicator); // we need a vector without ghost elements to access and fill its components.
 
     for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i=i+3){
-        auxiliary_vector[local_dofs[i+0]] = 0.0 ;  // xth component
+
+        auxiliary_vector[local_dofs[i+0]] = 0.0;  // xth component
         auxiliary_vector[local_dofs[i+1]] = 0.0 ;  // yth component
-        auxiliary_vector[local_dofs[i+2]] = 0.001 ; // zth component
+        auxiliary_vector[local_dofs[i+2]] = 1e-7 ; // zth component
     }
     
     // After specifying components of the auxiliary vector we make it to be in the form as D (i.e. with ghost cells)
@@ -330,18 +342,18 @@ void FEM<dim>::assemble_vel(){
                 double n = 1-r*r;
 
                 // initial toroidal component of the magnetic field, B_z = 0
-                BT_INITIAL[0] = -y/R * pow(R,4) * n*n;
-                BT_INITIAL[1] = x/R * pow(R,4) * n*n;
+                BT_INITIAL[0] = -y * pow(R,3) * n*n;
+                BT_INITIAL[1] = x * pow(R,3) * n*n;
 
                 for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                     for(unsigned int k=0; k<dim; k++){ 
                         for (unsigned int B=0; B<dofs_per_elem/3; B++) { 
                             Klocal[dim*A+k][dim*B+k] += fe_values.shape_value(dim*A+k,q)*fe_values.shape_value(dim*B+k,q)*fe_values.JxW(q); 
                         }
-                        for(unsigned int i=0; i<dim; i++){ 
-                            for(unsigned int j=0; j<dim; j++){ 
-                                Flocal[dim*A+k] += BT_INITIAL[i]*e(i,j,k)*fe_values.shape_grad(A*dim+k,q)[j]*fe_values.JxW(q); // f
-                            }
+                        for(unsigned int ii=k+1; ii<k+3; ii++){ 
+                            unsigned int i = ii%3;
+                            unsigned int j = 3-i-k;
+                            Flocal[dim*A+k] -= BT_INITIAL[i]*e(i,j,k)*fe_values.shape_grad(A*dim+k,q)[j]*fe_values.JxW(q); // f
                         }
                     }
                 }   
@@ -362,15 +374,15 @@ void FEM<dim>::assemble_vel(){
                         double n = 1-r*r;
 
                          // initial toroidal component of the magnetic field, B_z = 0
-                        BT_INITIAL[0] = -y/R * pow(R,4) * n*n;
-                        BT_INITIAL[1] = x/R * pow(R,4) * n*n;
+                        BT_INITIAL[0] = -y * pow(R,3) * n*n;
+                        BT_INITIAL[1] = x * pow(R,3) * n*n;
 
                         for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                             for(unsigned int i=0; i<dim; i++){ 
-                                for(unsigned int j=0; j<dim; j++){ 
-                                    for(unsigned int k=0; k<dim; k++){               
-                                        Flocal[dim*A+j] -= fe_face_values.normal_vector(q)[i]*e(i,j,k)*fe_face_values.shape_value(A*dim+j,q)*BT_INITIAL[k]*fe_face_values.JxW(q); // f         
-                                    }
+                                for(unsigned int jj=i+1; jj<i+3; jj++){ 
+                                    unsigned int j = jj%3;
+                                    unsigned int k = 3-i-j;             
+                                    Flocal[dim*A+j] += fe_face_values.normal_vector(q)[i]*e(i,j,k)*fe_face_values.shape_value(A*dim+j,q)*BT_INITIAL[k]*fe_face_values.JxW(q); // f         
                                 }
                             }
                         }  
@@ -400,17 +412,38 @@ void FEM<dim>::solve_vel(){
 
     computing_timer.enter_subsection ("Solve"); 
                                             
-    SolverControl solver_control(1000, 1e-12 * F.l2_norm());
+    SolverControl solver_control(5000, 1e-15 * F.l2_norm());
     dealii::TrilinosWrappers::SolverCG cg(solver_control);
     dealii::TrilinosWrappers::PreconditionSSOR preconditioner;
     preconditioner.initialize(K, 1.0);
     cg.solve(K, completely_distributed_solution, F, preconditioner);
        
     // above we solve the following equation: A = curl ( B_toroidar ). Therefore, to obtain the velocities we also need to divide the above solution by 4pi n, since v = 1/(4pi n) A
-    for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i++){
-        double r = std::sqrt( pow(dof_coords[local_dofs[i]][0],2) + pow(dof_coords[local_dofs[i]][1],2) + pow(dof_coords[local_dofs[i]][2],2) );
-        double n = 1 - r*r + 1e-5;
-        completely_distributed_solution(local_dofs[i]) = completely_distributed_solution(local_dofs[i])/4./pi/n ;
+    for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i=i+3){
+
+        std::vector<double> positions = {dof_coords[local_dofs[i]][0] ,dof_coords[local_dofs[i]][1] ,dof_coords[local_dofs[i]][2]};
+
+        double r = std::sqrt( pow(positions[0],2) + pow(positions[1],2) + pow(positions[2],2));
+        double x = positions[0];
+        double y = positions[1];
+        double z = positions[2];
+        double R = std::sqrt(x*x+y*y);
+        double n = 1. - r*r;
+        
+        for (unsigned int j=0; j<3; j++){
+            /*
+            if(j==0){
+                completely_distributed_solution(local_dofs[i+j]) = -4*x*z*(r*r-1)*R*R*R;
+            }
+            else if(j==1){
+                completely_distributed_solution(local_dofs[i+j]) = -4*y*z*(r*r-1)*R*R*R;
+            }
+            else{
+                completely_distributed_solution(local_dofs[i+j]) = (r*r-1)*R*R*R * (9*x*x + 9*y*y + 5*z*z-5);
+            }
+            */
+            completely_distributed_solution(local_dofs[i+j]) = completely_distributed_solution(local_dofs[i+j])/(4.*pi * n);
+        } 
     }
 
     // now we put the velocities to a vector, that contains ghost cell. It will become important in the following assembly section of the code, where we have to retrieve some 
@@ -443,110 +476,115 @@ void FEM<dim>::assemble_system(){
                                       update_JxW_values |
                                       update_gradients |
                                       update_normal_vectors); 
- 
-    K=0; M=0; 
+
+    K=0, M=0; 
 
     const unsigned int dofs_per_elem = fe.dofs_per_cell; 
-    const unsigned int num_quad_pts = quadrature_formula.size(); 
+    const unsigned int num_quad_pts = quadrature_formula.size();    
     const unsigned int num_face_quad_pts = face_quadrature_formula.size(); 
     const unsigned int faces_per_elem = GeometryInfo<dim>::faces_per_cell; 
 
     FullMatrix<double> Klocal (dofs_per_elem, dofs_per_elem); 
     FullMatrix<double> Mlocal (dofs_per_elem, dofs_per_elem); 
     Vector<double> Flocal (dofs_per_elem); 
-
-    std::vector<unsigned int> local_dof_indices (dofs_per_elem); 
-
+    std::vector<unsigned int> local_dof_indices (dofs_per_elem);  
     typename DoFHandler<dim>::active_cell_iterator elem = dof_handler.begin_active(), endc = dof_handler.end(); 
 
     for (;elem!=endc; ++elem){
 
         if (elem->is_locally_owned()){
- 
+
             fe_values.reinit(elem); 
             elem->get_dof_indices (local_dof_indices); 
-        
-            Klocal = 0.; 
-            Mlocal = 0.;  
-            Flocal = 0.;  
 
-            for (unsigned int q=0; q<num_quad_pts; ++q){  
+            Klocal = 0.;  
+            Mlocal = 0.; 
+
+            for (unsigned int q=0; q<num_quad_pts; ++q){ 
+
                 Vector<double> u(dim);
                 u = 0;
+
                 for(unsigned int A=0; A<dofs_per_elem/3; A++){
                     for(unsigned int k=0; k<dim; k++){ 
                         u[k] += VEL[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
                     }
                 }
-                for (unsigned int A=0; A<dofs_per_elem/3; A++){
+
+
+                for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                     for(unsigned int k=0; k<dim; k++){ 
-                        for (unsigned int B=0; B<dofs_per_elem/3; B++) {  
-                            Mlocal[dim*A+k][dim*B+k] += fe_values.shape_value(dim*A+k,q)*fe_values.shape_value(dim*B+k,q)*fe_values.JxW(q);
-                            for(unsigned int i=0; i<dim; i++){
-                                for(unsigned int j=0; j<dim; j++){
-                                    for(unsigned int l=0; l<dim; l++){ 
-                                        for(unsigned int m=0; m<dim; m++){ 
-                                            Klocal[dim*A+k][dim*B+m] -= e(i,j,k)*fe_values.shape_grad(A*dim+k,q)[j]*e(i,l,m)*u[l]*fe_values.shape_value(B*dim+m,q)*fe_values.JxW(q); // f
-                                        }
-                                    }
+                        for (unsigned int B=0; B<dofs_per_elem/3; B++) { 
+                            Mlocal[dim*A+k][dim*B+k] += fe_values.shape_value(dim*A+k,q)*fe_values.shape_value(dim*B+k,q)*fe_values.JxW(q); 
+                        
+                            for(unsigned int ii=k+1; ii<k+3; ii++){ 
+                                unsigned int i = ii%3;
+                                unsigned int j = 3-i-k;
+                                for(unsigned int ll=i+1; ll<i+3; ll++){ 
+                                    unsigned int l = ll%3;
+                                    unsigned int m = 3-l-i;
+                                    Klocal[dim*A+k][dim*B+m] += e(i,l,m)*u[l]*fe_values.shape_value(B*dim+m,q)*e(i,j,k)*fe_values.shape_grad(A*dim+k,q)[j]*fe_values.JxW(q); // f
                                 }
                             }
-                        } 
+                        }
                     }
                 }   
-            }  
-
-            // performing the surface integral
-            for (unsigned int f=0; f < faces_per_elem; f++){         
+            }
+            // performing the surface integral       
+            for (unsigned int f=0; f < faces_per_elem; f++){ 
                 fe_face_values.reinit (elem, f); 
-                for (unsigned int q=0; q<num_face_quad_pts; ++q){ 
-                    if(elem->face(f)->at_boundary()){ 
-                        // the velocity field was previously computed at all the nodes of the manifold, but here we need it at the quadrature points. Thus we do the interpolation.
+                if(elem->face(f)->at_boundary()){
+                    for (unsigned int q=0; q<num_face_quad_pts; ++q){ 
+
                         Vector<double> u(dim);
-                        u = 0.0;
+                        u = 0;
+
                         for(unsigned int A=0; A<dofs_per_elem/3; A++){
                             for(unsigned int k=0; k<dim; k++){ 
                                 u[k] += VEL[local_dof_indices[A*dim+k]]*fe_face_values.shape_value(A*dim+k,q);
                             }
                         }
+
                         for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
-                            for(unsigned int i=0; i<dim; i++){ 
-                                for (unsigned int B=0; B<dofs_per_elem/3; B++) {
-                                    for(unsigned int j=0; j<dim; j++){ 
-                                        for(unsigned int k=0; k<dim; k++){ 
-                                            for(unsigned int l=0; l<dim; l++){ 
-                                                for(unsigned int m=0; m<dim; m++){ 
-                                                    Klocal[dim*A+j][dim*B+m] += fe_face_values.normal_vector(q)[i]*e(i,j,k)*fe_face_values.shape_value(A*dim+j,q)*e(k,l,m)*u[l]*fe_values.shape_value(B*dim+m,q)*fe_face_values.JxW(q); 
-                                                }
-                                            }
+                            for (unsigned int B=0; B<dofs_per_elem/3; B++) { 
+                                for(unsigned int i=0; i<dim; i++){ 
+                                    for(unsigned int jj=i+1; jj<i+3; jj++){ 
+                                        unsigned int j = jj%3;
+                                        unsigned int k = 3-i-j;             
+                                        for(unsigned int ll=k+1; ll<k+3; ll++){ 
+                                            unsigned int l = ll%3;
+                                            unsigned int m = 3-l-k;
+                                            Klocal[dim*A+j][dim*B+m] -= fe_face_values.normal_vector(q)[i]*e(i,j,k)*fe_face_values.shape_value(A*dim+j,q)*e(k,l,m)*u[l]*fe_face_values.shape_value(B*dim+m,q)*fe_face_values.JxW(q);     
                                         }
-                                    }
+                                    }     
                                 }
                             }
                         }  
                     }
                 }
-            }
+            }       
+            // adding up local contributions to the global matricies and vectors
             constraints.distribute_local_to_global (Mlocal,
-                                                    local_dof_indices,
-                                                    M);
+                                                   local_dof_indices,
+                                                   M);
+
             constraints.distribute_local_to_global (Klocal,
-                                                    local_dof_indices,
-                                                    K);
+                                                   local_dof_indices,
+                                                   K);
         }
     }
-
-    M.compress (VectorOperation::add);
+    // the interative solution of the linear system begins only after all the processors are done with the assembly of their part of the manifold. 
+    // Thus some comminication between the processors is required
     K.compress (VectorOperation::add);
+    M.compress (VectorOperation::add);
 }
-
 
 
 template <int dim>
 void FEM<dim>::solve(){
 
-    double delta_t = 0.00005;                                                   // initial
-    double t_step = 0.0, t_max = 1;                                            // initial time
+    double delta_t = 0.01;                                                     // initial
+    double t_step = 0.0, t_max = 10;                                           // initial time
 
 
     apply_initial_conditions(); // apply the initial conditions to the poloidal perturbation field                                        
@@ -556,20 +594,23 @@ void FEM<dim>::solve(){
      
     computing_timer.enter_subsection ("Output");  
     output_vel(0); 
+    output_vel_dat(0);
     computing_timer.leave_subsection();
-    
     unsigned int snap_shot_counter = 0;
-    
+
     while(t_step < t_max){        
 
-        computing_timer.enter_subsection ("Output");                               
-        output_results(snap_shot_counter);
-        computing_timer.leave_subsection();
+        if (snap_shot_counter%5==0){
+            computing_timer.enter_subsection ("Output");                               
+            output_results(snap_shot_counter/5);
+            output_sol_dat(snap_shot_counter/5);
+            computing_timer.leave_subsection();
+            pcout << "output" << std::endl;
+        }
 
-        t_step += delta_t;                                                    // updating time
+        t_step += delta_t;                                                    // updating time 
       
         assemble_system();
-
         computing_timer.enter_subsection ("Solve"); 
                                             
         D_tilde = D;
@@ -577,13 +618,11 @@ void FEM<dim>::solve(){
         system_matrix.add(-delta_t,K);
 
         M.vmult(RHS,D_tilde);
-        
-        SolverControl solver_control(1000, 1e-8 * RHS.l2_norm());
+        SolverControl solver_control(1000, 3e-10 * RHS.l2_norm());
         dealii::TrilinosWrappers::SolverCG cg(solver_control);
         dealii::TrilinosWrappers::PreconditionSSOR preconditioner;
         preconditioner.initialize(system_matrix, 1.0);
         cg.solve(system_matrix, completely_distributed_solution, RHS, preconditioner);
-        
         constraints.distribute (completely_distributed_solution);
 
         D = completely_distributed_solution;
@@ -597,7 +636,7 @@ void FEM<dim>::solve(){
         pcout << " " << std::endl;
         
         snap_shot_counter ++;
-    }     
+    }    
 }
 
 
@@ -645,6 +684,66 @@ void FEM<dim>::output_vel (const unsigned int cycle) const
                                       ".pvtu").c_str());
         data_out.write_pvtu_record (master_output, filenames); 
     }
+}
+
+// to save the velocity field as .dat-files
+template <int dim>
+void FEM<dim>::output_vel_dat(const unsigned int cycle) 
+{
+    
+    const std::string filename = ("output/solution_vel-" +
+                                  Utilities::int_to_string (cycle, 3) +
+                                  "." +
+                                  Utilities::int_to_string
+                                  (triangulation.locally_owned_subdomain(), 4) + ".dat");
+
+    FILE* vel_profile;
+    vel_profile = std::fopen(filename.c_str(), "w" );
+
+    for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i=i+3){
+        
+        std::vector<double> positions = {dof_coords[local_dofs[i]][0] ,dof_coords[local_dofs[i]][1] ,dof_coords[local_dofs[i]][2]};
+        std::vector<double> values =   { VEL(local_dofs[i+0]),  VEL(local_dofs[i+1]),  VEL(local_dofs[i+2]) };
+
+        std::fprintf(vel_profile, "%14.5e  %14.5e  %14.5e %14.5e %14.5e %14.5e\n",         positions[0],
+                                                                                           positions[1],
+                                                                                           positions[2],
+                                                                                           values[0],
+                                                                                           values[1],
+                                                                                           values[2]);
+    }
+    
+    std::fclose(vel_profile);
+}
+
+
+// to save the solution as .dat-files
+template <int dim>
+void FEM<dim>::output_sol_dat(const unsigned int cycle) 
+{
+    
+    const std::string filename = ("output/solution_real-" +
+                                  Utilities::int_to_string (cycle, 3) +
+                                  "." +
+                                  Utilities::int_to_string
+                                  (triangulation.locally_owned_subdomain(), 4) + ".dat");
+
+    FILE* vel_profile;
+    vel_profile = std::fopen(filename.c_str(), "w" );
+
+    for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i=i+3){
+        
+        std::vector<double> positions = {dof_coords[local_dofs[i]][0] ,dof_coords[local_dofs[i]][1] ,dof_coords[local_dofs[i]][2]};
+        std::vector<double> values =   { D(local_dofs[i+0]),  D(local_dofs[i+1]),  D(local_dofs[i+2]) };
+
+        std::fprintf(vel_profile, "%14.5e  %14.5e  %14.5e %14.5e %14.5e %14.5e\n",         positions[0],
+                                                                                           positions[1],
+                                                                                           positions[2],
+                                                                                           values[0],
+                                                                                           values[1],
+                                                                                           values[2]);
+    }
+    std::fclose(vel_profile);
 }
 
 
