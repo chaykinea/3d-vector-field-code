@@ -362,7 +362,7 @@ void FEM<dim>::assemble_vel(){
             for (unsigned int f=0; f < faces_per_elem; f++){ 
                 fe_face_values.reinit (elem, f); 
                 if(elem->face(f)->at_boundary()){
-                    for (unsigned int q=0; q<num_face_quad_pts; ++q){ 
+                    for (unsigned int q=0; q<num_face_quad_pts; ++q){  
 
                         double x = fe_face_values.quadrature_point(q)[0]; 
                         double y = fe_face_values.quadrature_point(q)[1]; 
@@ -597,7 +597,7 @@ void FEM<dim>::solve(){
     output_vel_dat(0);
     computing_timer.leave_subsection();
     unsigned int snap_shot_counter = 0;
-
+    
     while(t_step < t_max){        
 
         if (snap_shot_counter%5==0){
