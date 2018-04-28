@@ -54,7 +54,7 @@ using namespace dealii;
 //Define the order of the basis functions (Lagrange polynomials)
 //and the order of the quadrature rule globally
 const unsigned int order = 1;
-const unsigned int quadRule = 2;
+const unsigned int quadRule = 2; // exactly integrate 2*quadRule - 1
 
 template <int dim>
 class FEM
@@ -216,9 +216,16 @@ void FEM<dim>::apply_initial_conditions(){
 
     for (unsigned int i=0; i<dof_handler.n_locally_owned_dofs(); i=i+3){
 
+        std::vector<double> positions = {dof_coords[local_dofs[i]][0] ,dof_coords[local_dofs[i]][1] ,dof_coords[local_dofs[i]][2]};
+
+        double r = std::sqrt( pow(positions[0],2) + pow(positions[1],2) + pow(positions[2],2));
+        double x = positions[0];
+        double y = positions[1];
+        double z = positions[2];
+
         auxiliary_vector[local_dofs[i+0]] = 0.0;  // xth component
         auxiliary_vector[local_dofs[i+1]] = 0.0 ;  // yth component
-        auxiliary_vector[local_dofs[i+2]] = 1e-7 ; // zth component
+        auxiliary_vector[local_dofs[i+2]] = 1e-7; //1e-7 ; // zth component
     }
     
     // After specifying components of the auxiliary vector we make it to be in the form as D (i.e. with ghost cells)
@@ -342,8 +349,17 @@ void FEM<dim>::assemble_vel(){
                 double n = 1-r*r;
 
                 // initial toroidal component of the magnetic field, B_z = 0
-                BT_INITIAL[0] = -y * pow(R,3) * n*n;
-                BT_INITIAL[1] = x * pow(R,3) * n*n;
+                BT_INITIAL[0] = -y * pow(R,2) * n*n;
+                BT_INITIAL[1] = x * pow(R,2) * n*n;
+                BT_INITIAL[2] = 0.0;
+                //BT_INITIAL[1] = 2*x;
+                //BT_INITIAL[0] = -2*y;
+
+                for(unsigned int A=0; A<dofs_per_elem/3; A++){
+                    for(unsigned int k=0; k<dim; k++){ 
+                        BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
+                    }
+                }
 
                 for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                     for(unsigned int k=0; k<dim; k++){ 
@@ -374,8 +390,18 @@ void FEM<dim>::assemble_vel(){
                         double n = 1-r*r;
 
                          // initial toroidal component of the magnetic field, B_z = 0
-                        BT_INITIAL[0] = -y * pow(R,3) * n*n;
-                        BT_INITIAL[1] = x * pow(R,3) * n*n;
+                        BT_INITIAL[0] = -y * pow(R,2) * n*n;
+                        BT_INITIAL[1] = x * pow(R,2) * n*n;
+                        BT_INITIAL[2] = 0.0;
+                        //BT_INITIAL[1] = 2*x;
+                        //BT_INITIAL[0] = -2*y;
+
+                        for(unsigned int A=0; A<dofs_per_elem/3; A++){
+                            for(unsigned int k=0; k<dim; k++){ 
+                                BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
+                            }
+                        }
+
 
                         for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                             for(unsigned int i=0; i<dim; i++){ 
@@ -412,7 +438,7 @@ void FEM<dim>::solve_vel(){
 
     computing_timer.enter_subsection ("Solve"); 
                                             
-    SolverControl solver_control(5000, 1e-15 * F.l2_norm());
+    SolverControl solver_control(5000, 3e-16 * F.l2_norm());
     dealii::TrilinosWrappers::SolverCG cg(solver_control);
     dealii::TrilinosWrappers::PreconditionSSOR preconditioner;
     preconditioner.initialize(K, 1.0);
@@ -511,7 +537,6 @@ void FEM<dim>::assemble_system(){
                     }
                 }
 
-
                 for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                     for(unsigned int k=0; k<dim; k++){ 
                         for (unsigned int B=0; B<dofs_per_elem/3; B++) { 
@@ -541,7 +566,7 @@ void FEM<dim>::assemble_system(){
 
                         for(unsigned int A=0; A<dofs_per_elem/3; A++){
                             for(unsigned int k=0; k<dim; k++){ 
-                                u[k] += VEL[local_dof_indices[A*dim+k]]*fe_face_values.shape_value(A*dim+k,q);
+                               u[k] += VEL[local_dof_indices[A*dim+k]]*fe_face_values.shape_value(A*dim+k,q);
                             }
                         }
 
@@ -583,32 +608,35 @@ void FEM<dim>::assemble_system(){
 template <int dim>
 void FEM<dim>::solve(){
 
-    double delta_t = 0.01;                                                     // initial
-    double t_step = 0.0, t_max = 10;                                           // initial time
-
+    double delta_t = 0.005;                                                   // initial
+    double t_step = 0.0, t_max = 10.2;                                        // initial time
 
     apply_initial_conditions(); // apply the initial conditions to the poloidal perturbation field                                        
 
-    assemble_vel(); // assembly for the velocity field
-    solve_vel(); // compute the velocity field
-     
-    computing_timer.enter_subsection ("Output");  
-    output_vel(0); 
-    output_vel_dat(0);
-    computing_timer.leave_subsection();
     unsigned int snap_shot_counter = 0;
     
     while(t_step < t_max){        
 
-        if (snap_shot_counter%5==0){
+        if (snap_shot_counter%10==0){
             computing_timer.enter_subsection ("Output");                               
-            output_results(snap_shot_counter/5);
-            output_sol_dat(snap_shot_counter/5);
+            output_results(snap_shot_counter/10);
+            output_sol_dat(snap_shot_counter/10);
             computing_timer.leave_subsection();
-            pcout << "output" << std::endl;
+            pcout << "output B" << std::endl;
         }
 
         t_step += delta_t;                                                    // updating time 
+
+        assemble_vel(); // assembly for the velocity field
+        solve_vel(); // compute the velocity field
+        
+        if (snap_shot_counter%10==0){
+            computing_timer.enter_subsection ("Output");  
+            output_vel(snap_shot_counter/10); 
+            output_vel_dat(snap_shot_counter/10);
+            computing_timer.leave_subsection();
+            pcout << "output vel" << std::endl;
+        }
       
         assemble_system();
         computing_timer.enter_subsection ("Solve"); 
@@ -618,7 +646,7 @@ void FEM<dim>::solve(){
         system_matrix.add(-delta_t,K);
 
         M.vmult(RHS,D_tilde);
-        SolverControl solver_control(1000, 3e-10 * RHS.l2_norm());
+        SolverControl solver_control(1000, 3e-10 * RHS.l2_norm()); // for the real problem it was 3e-10
         dealii::TrilinosWrappers::SolverCG cg(solver_control);
         dealii::TrilinosWrappers::PreconditionSSOR preconditioner;
         preconditioner.initialize(system_matrix, 1.0);
@@ -659,7 +687,7 @@ void FEM<dim>::output_vel (const unsigned int cycle) const
 
     data_out.build_patches ();
 
-    const std::string filename = ("output/vel-" +
+    const std::string filename = ("output/vel-full-" +
                                   Utilities::int_to_string (cycle, 3) +
                                   "." +
                                   Utilities::int_to_string
@@ -673,13 +701,13 @@ void FEM<dim>::output_vel (const unsigned int cycle) const
         for (unsigned int i=0;
              i<Utilities::MPI::n_mpi_processes(mpi_communicator);
              ++i)
-          filenames.push_back ("vel-" +
+          filenames.push_back ("vel-full-" +
                                Utilities::int_to_string (cycle, 3) +
                                "." +
                                Utilities::int_to_string (i, 4) +
                                ".vtu");
 
-        std::ofstream master_output (("output/vel-" +
+        std::ofstream master_output (("output/vel-full-" +
                                       Utilities::int_to_string (cycle, 3) +
                                       ".pvtu").c_str());
         data_out.write_pvtu_record (master_output, filenames); 
@@ -691,7 +719,7 @@ template <int dim>
 void FEM<dim>::output_vel_dat(const unsigned int cycle) 
 {
     
-    const std::string filename = ("output/solution_vel-" +
+    const std::string filename = ("output/solution_vel-full-" +
                                   Utilities::int_to_string (cycle, 3) +
                                   "." +
                                   Utilities::int_to_string
@@ -722,7 +750,7 @@ template <int dim>
 void FEM<dim>::output_sol_dat(const unsigned int cycle) 
 {
     
-    const std::string filename = ("output/solution_real-" +
+    const std::string filename = ("output/solution-full-" +
                                   Utilities::int_to_string (cycle, 3) +
                                   "." +
                                   Utilities::int_to_string
@@ -765,7 +793,7 @@ void FEM<dim>::output_results (const unsigned int cycle) const
 
     data_out.build_patches ();
 
-    const std::string filename = ("output/solution-" +
+    const std::string filename = ("output/solution-full-" +
                                   Utilities::int_to_string (cycle, 3) +
                                   "." +
                                   Utilities::int_to_string
@@ -779,13 +807,13 @@ void FEM<dim>::output_results (const unsigned int cycle) const
         for (unsigned int i=0;
              i<Utilities::MPI::n_mpi_processes(mpi_communicator);
              ++i)
-          filenames.push_back ("solution-" +
+          filenames.push_back ("solution-full-" +
                                Utilities::int_to_string (cycle, 3) +
                                "." +
                                Utilities::int_to_string (i, 4) +
                                ".vtu");
 
-        std::ofstream master_output (("output/solution-" +
+        std::ofstream master_output (("output/solution-full-" +
                                       Utilities::int_to_string (cycle, 3) +
                                       ".pvtu").c_str());
         data_out.write_pvtu_record (master_output, filenames);
