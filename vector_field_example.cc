@@ -53,8 +53,8 @@ using namespace dealii;
 
 //Define the order of the basis functions (Lagrange polynomials)
 //and the order of the quadrature rule globally
-const unsigned int order = 1;
-const unsigned int quadRule = 2; // exactly integrate 2*quadRule - 1
+const unsigned int order = 3;
+const unsigned int quadRule = 4; // exactly integrate 2*quadRule - 1
 
 template <int dim>
 class FEM
@@ -198,11 +198,11 @@ void FEM<dim>::generate_mesh(){ // setting up the mesh
             z_center = 0.;
 
     Point<dim,double> center(x_center,y_center,z_center);
-    GridGenerator::hyper_shell (triangulation, center, 0.5, 0.9, 96, true);
+    GridGenerator::half_hyper_shell (triangulation, center, 0.5, 0.9,true);
     static const SphericalManifold<3> manifold_description(center);
     triangulation.set_all_manifold_ids(0);
     triangulation.set_manifold (0, manifold_description);
-    triangulation.refine_global(3);
+    triangulation.refine_global(4);
 }
 
 
@@ -352,14 +352,12 @@ void FEM<dim>::assemble_vel(){
                 BT_INITIAL[0] = -y * pow(R,2) * n*n;
                 BT_INITIAL[1] = x * pow(R,2) * n*n;
                 BT_INITIAL[2] = 0.0;
-                //BT_INITIAL[1] = 2*x;
-                //BT_INITIAL[0] = -2*y;
 
-                for(unsigned int A=0; A<dofs_per_elem/3; A++){
-                    for(unsigned int k=0; k<dim; k++){ 
-                        BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
-                    }
-                }
+                //for(unsigned int A=0; A<dofs_per_elem/3; A++){
+                //    for(unsigned int k=0; k<dim; k++){ 
+                //        BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
+                //    }
+                // }
 
                 for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
                     for(unsigned int k=0; k<dim; k++){ 
@@ -393,14 +391,12 @@ void FEM<dim>::assemble_vel(){
                         BT_INITIAL[0] = -y * pow(R,2) * n*n;
                         BT_INITIAL[1] = x * pow(R,2) * n*n;
                         BT_INITIAL[2] = 0.0;
-                        //BT_INITIAL[1] = 2*x;
-                        //BT_INITIAL[0] = -2*y;
 
-                        for(unsigned int A=0; A<dofs_per_elem/3; A++){
-                            for(unsigned int k=0; k<dim; k++){ 
-                                BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
-                            }
-                        }
+                        //for(unsigned int A=0; A<dofs_per_elem/3; A++){
+                        //    for(unsigned int k=0; k<dim; k++){ 
+                        //        BT_INITIAL[k] += D[local_dof_indices[A*dim+k]]*fe_values.shape_value(A*dim+k,q);
+                        //    }
+                        //}
 
 
                         for (unsigned int A=0; A<dofs_per_elem/3; A++){ 
@@ -617,10 +613,10 @@ void FEM<dim>::solve(){
     
     while(t_step < t_max){        
 
-        if (snap_shot_counter%10==0){
+        if (snap_shot_counter%1==0){
             computing_timer.enter_subsection ("Output");                               
-            output_results(snap_shot_counter/10);
-            output_sol_dat(snap_shot_counter/10);
+            output_results(snap_shot_counter/1);
+            output_sol_dat(snap_shot_counter/1);
             computing_timer.leave_subsection();
             pcout << "output B" << std::endl;
         }
